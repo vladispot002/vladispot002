@@ -5,8 +5,8 @@ stats card, contribution streaks and most used languages.
 Data comes from the GitHub GraphQL API (standard library only, no dependencies).
 
 Usage:
-    GH_TOKEN=<token> python3 make_stats.py      -> writes stats.svg
-    python3 make_stats.py --demo                -> writes stats-demo.svg with sample numbers
+    GH_TOKEN=<token> python3 make_stats.py      -> writes stats.svg and graph.svg
+    python3 make_stats.py --demo                -> writes stats-demo.svg and graph-demo.svg with sample numbers
 Env:
     GH_TOKEN   token for the API (in GitHub Actions: secrets.GITHUB_TOKEN or a PAT with read:user)
     GH_LOGIN   GitHub username (default below)
@@ -27,6 +27,7 @@ ORANGE = "#ff4500"
 BG, LINE, DIM, MID, WHITE = "#0e0d11", "#2c2b36", "#6e6c7a", "#a9a7b8", "#f1f0f7"
 LANG_COLORS = ["#ff4500", "#ff6a33", "#ff8c5a", "#ffa882", "#ffc2a6", "#ffdccb"]
 W, H = 846, 360
+GH = 266
 API = "https://api.github.com/graphql"
 
 Q_MAIN = """
@@ -104,10 +105,11 @@ def fetch(token):
 
 def demo():
     days = {}
-    d0 = date.today() - timedelta(days=200)
-    for i in range(201):
+    d0 = date.today() - timedelta(days=400)
+    for i in range(401):
         d = d0 + timedelta(days=i)
-        days[d.isoformat()] = 0 if (i % 9 in (0, 1)) else (i % 5) + 1
+        r = (i * 2654435761 % 2 ** 32) / 2 ** 32
+        days[d.isoformat()] = 0 if r < 0.45 or i < 120 else int(r * r * 14) + 1
     return {
         "stars": 3, "commits": 126, "prs": 4, "issues": 1, "contrib": 2, "reviews": 0, "followers": 2,
         "langs": [("C++", 61.4), ("Python", 24.9), ("JavaScript", 7.3), ("CMake", 3.9), ("HTML", 1.7), ("CSS", 0.8)],
@@ -272,14 +274,102 @@ def build(d, out):
     print(f"wrote {out} ({len(svg) / 1024:.0f} KB)")
 
 
+GRAPH_CHARS = ["·", ":", "+", "#", "@"]
+GRAPH_COLORS = [LINE, "#7a2a10", "#b83810", ORANGE, "#ff9a70"]
+
+
+def build_graph(d, out):
+    days = {date.fromisoformat(k): v for k, v in d["days"].items()}
+    today = date.today()
+    sun = today - timedelta(days=(today.weekday() + 1) % 7)
+    start = sun - timedelta(weeks=52)
+    cols = 53
+    gx, gy, step_x, step_y = 66, 82, 13.8, 17
+    px, py, pw, ph = 24, 34, 798, 206
+    cells, counts, months, last_m, last_c = [], [], [], None, -9
+    for c in range(cols):
+        first = start + timedelta(weeks=c)
+        if first.month != last_m and c - last_c >= 3:
+            months.append((c, f"{first:%b}"))
+            last_m, last_c = first.month, c
+        for r in range(7):
+            dt = start + timedelta(weeks=c, days=r)
+            if dt > today:
+                continue
+            v = days.get(dt, 0)
+            counts.append((dt, v))
+            cells.append((c, r, dt, v))
+    mx = max([v for _, v in counts] or [1]) or 1
+    lvl = lambda v: 0 if v == 0 else (1 if v <= mx * 0.25 else 2 if v <= mx * 0.5 else 3 if v <= mx * 0.75 else 4)
+    total = sum(v for _, v in counts)
+    best_dt, best_v = max(counts, key=lambda x: x[1]) if counts else (today, 0)
+
+    body = [f'<rect width="{W}" height="{GH}" rx="12" fill="{BG}"/>']
+    body.append(panel(px, py, pw, ph, f"{LOGIN} / commit rain", 0))
+    for c, label in months:
+        body.append(f'<text x="{gx + c * step_x:.1f}" y="{gy - 14}" font-size="10.5" fill="{DIM}">{label}</text>')
+    for r, label in ((1, "Mon"), (3, "Wed"), (5, "Fri")):
+        body.append(f'<text x="38" y="{gy + r * step_y + 4:.1f}" font-size="10" fill="{DIM}">{label}</text>')
+    body.append(f'<clipPath id="gc"><rect x="{gx - 4}" y="{gy - 12}" width="{cols * step_x + 6:.1f}" height="{7 * step_y + 8}"/></clipPath>')
+    items = []
+    for c, r, dt, v in cells:
+        delay = c * 0.05 + r * 0.035 + ((c * 31 + r * 17) % 7) * 0.05 + 0.4
+        x = gx + c * step_x + step_x / 2
+        y = gy + r * step_y + 4
+        l = lvl(v)
+        items.append(f'<text class="c l{l}" x="{x:.1f}" y="{y:.1f}" text-anchor="middle" font-size="13" '
+                     f'style="animation-delay:{delay:.2f}s">{GRAPH_CHARS[l]}</text>')
+        if dt == today:
+            items.append(f'<rect class="c td" x="{x - 4.2:.1f}" y="{y - 10.5:.1f}" width="8.4" height="14" fill="{WHITE}" '
+                         f'style="animation-delay:{delay + 0.9:.2f}s"/>')
+    body.append("".join(items))
+    body.append(f'<g clip-path="url(#gc)"><rect class="sw" x="{gx - 90}" y="{gy - 12}" width="80" height="{7 * step_y + 8}" '
+                f'fill="url(#sg)"/></g>')
+    fy = py + ph - 18
+    body.append(f'<g class="a" style="animation-delay:1.2s"><text x="42" y="{fy}" font-size="12" fill="{MID}">'
+                f'{total} contributions in the last year<tspan fill="{DIM}"> · busiest day: {best_v} on {fmt(best_dt)}</tspan></text>'
+                f'<text x="640" y="{fy}" font-size="11" fill="{DIM}">less</text>'
+                + "".join(f'<text class="l{i}" x="{676 + i * 16}" y="{fy}" font-size="13">{GRAPH_CHARS[i]}</text>' for i in range(5))
+                + f'<text x="762" y="{fy}" font-size="11" fill="{DIM}">more</text></g>')
+    body.append(f'<rect width="{W}" height="{GH}" rx="12" fill="url(#dots)" pointer-events="none"/>')
+
+    css = (font_faces()
+           + "text{font-family:JB,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:500;white-space:pre;font-variant-ligatures:none}"
+           + ".a{animation:in .55s cubic-bezier(.2,.7,.2,1) both}"
+           + "@keyframes in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}"
+           + ".dr{stroke-dasharray:1;animation:dr .9s cubic-bezier(.65,0,.35,1) .25s both}"
+           + "@keyframes dr{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}"
+           + "".join(f".l{i}{{fill:{c}}}" for i, c in enumerate(GRAPH_COLORS))
+           + ".c{animation:drop 10s linear infinite both}"
+           + "@keyframes drop{0%{opacity:0;transform:translateY(-52px);animation-timing-function:cubic-bezier(.5,0,1,.55)}"
+             "7%{opacity:1;transform:none}91%{opacity:1;transform:none}100%{opacity:0;transform:none}}"
+           + ".td{fill:#ffffff;opacity:.9}"
+           + ".sw{animation:sw 4.2s linear 3.4s infinite both}"
+           + f"@keyframes sw{{from{{transform:translateX(0)}}to{{transform:translateX({cols * step_x + 110:.0f}px)}}}}")
+    css += ".td{animation:drop 10s linear infinite both,bl 1.05s steps(1) infinite}@keyframes bl{50%{fill:#ff4500}}"
+    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{GH}" viewBox="0 0 {W} {GH}" role="img" '
+           f'aria-label="Contribution graph for {escape(NAME)}"><title>{escape(NAME)} contributions</title>'
+           f'<defs><pattern id="dots" width="6" height="6" patternUnits="userSpaceOnUse">'
+           f'<circle cx="3" cy="3" r=".6" fill="#ffffff" opacity=".07"/></pattern>'
+           f'<linearGradient id="sg" x1="0" x2="1" y1="0" y2="0"><stop offset="0" stop-color="{ORANGE}" stop-opacity="0"/>'
+           f'<stop offset=".7" stop-color="{ORANGE}" stop-opacity=".30"/><stop offset="1" stop-color="#ffffff" stop-opacity=".22"/></linearGradient></defs>'
+           f"<style>{css}</style>{''.join(body)}</svg>")
+    with open(out, "w", encoding="utf-8") as fh:
+        fh.write(svg)
+    print(f"wrote {out} ({len(svg) / 1024:.0f} KB)")
+
+
 def main():
     if "--demo" in sys.argv:
         build(demo(), "stats-demo.svg")
+        build_graph(demo(), "graph-demo.svg")
         return
     token = os.environ.get("GH_TOKEN")
     if not token:
         raise SystemExit("set GH_TOKEN (or run with --demo)")
-    build(fetch(token), "stats.svg")
+    data = fetch(token)
+    build(data, "stats.svg")
+    build_graph(data, "graph.svg")
 
 
 if __name__ == "__main__":

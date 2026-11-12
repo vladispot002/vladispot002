@@ -17,7 +17,3 @@
 <p align="center">
   <img src="activity.svg" alt="Recent activity" width="846">
 </p>
-
-<p align="center">
-  <img src="insights.svg" alt="Coding insights" width="846">
-</p>

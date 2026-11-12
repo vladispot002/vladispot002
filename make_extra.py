@@ -5,7 +5,6 @@ Extra profile blocks in the same style as stats.svg (reuses helpers from make_st
 Writes:
     repos.svg     top repositories + latest releases
     activity.svg  recent public activity
-    insights.svg  commit heatmap (weekday x hour) + language timeline by repo creation year
     wakatime.svg  coding time last 7 days (only if WAKATIME_API_KEY is set)
 
 Usage:
@@ -13,7 +12,7 @@ Usage:
     python3 make_extra.py --demo      -> writes *-demo.svg with sample data
 Env:
     GH_LOGIN  GitHub username (default from make_stats.py)
-    TZ_NAME   timezone for the heatmap and "updated" stamp (default Europe/Kyiv)
+    TZ_NAME   timezone for the "updated" stamp (default Europe/Kyiv)
 """
 import base64
 import json
@@ -210,59 +209,6 @@ def build_activity(d, out):
     wrap(body, 34 + ph + 34, f"Recent activity of {NAME}", out)
 
 
-def build_insights(d, out):
-    grid = [[0] * 24 for _ in range(7)]
-    for c in d["commits"]:
-        t = datetime.fromisoformat(c.replace("Z", "+00:00")).astimezone(TZ)
-        grid[t.weekday()][t.hour] += 1
-    mx = max(max(r) for r in grid) or 1
-    h = 34 + 190 + 40
-    body = [panel(24, 34, 456, 190, "when I code", 0)]
-    cell, gap, gx, gy = 14, 3, 70, 34 + 36
-    for dow, name in enumerate(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]):
-        y = gy + dow * (cell + gap)
-        body.append(text(44, y + 11, name, 10, DIM))
-        for hr in range(24):
-            v = grid[dow][hr]
-            lvl = 0 if v == 0 else 1 + min(3, int(3 * v / mx))
-            body.append(f'<rect x="{gx + hr * (cell + gap)}" y="{y}" width="{cell}" height="{cell}" rx="3" fill="{HEAT[lvl]}">'
-                        f'<title>{name} {hr:02d}:00 - {v} commits</title></rect>')
-    for hr in range(0, 24, 3):
-        body.append(text(gx + hr * (cell + gap), gy + 7 * (cell + gap) + 12, f"{hr:02d}", 10, DIM))
-
-    body.append(panel(496, 34, 326, 190, "languages by year", 1))
-    by = {}
-    for r in d["repos"]:
-        lang = (r.get("primaryLanguage") or {}).get("name")
-        if lang:
-            y = r["createdAt"][:4]
-            by.setdefault(y, {})
-            by[y][lang] = by[y].get(lang, 0) + 1
-    years = sorted(by)[-5:]
-    allc = {}
-    for y in years:
-        for k, v in by[y].items():
-            allc[k] = allc.get(k, 0) + v
-    order = [k for k, _ in sorted(allc.items(), key=lambda kv: -kv[1])][:5]
-    colors = {k: LANG_COLORS[i] for i, k in enumerate(order)}
-    for i, y in enumerate(years):
-        yy = 34 + 40 + i * 24
-        body.append(text(514, yy + 10, y, 11, MID))
-        tot = sum(by[y].get(k, 0) for k in order) or 1
-        x = 556
-        for k in order:
-            if k in by[y]:
-                w = 244 * by[y][k] / tot
-                body.append(f'<rect x="{x:.1f}" y="{yy}" width="{w + .4:.1f}" height="12" fill="{colors[k]}"><title>{escape(k)}: {by[y][k]}</title></rect>')
-                x += w
-    for i, k in enumerate(order):
-        lx = 514 + (i % 3) * 100
-        ly = 34 + 40 + 5 * 24 + (i // 3) * 16 + 2
-        body.append(f'<circle cx="{lx + 4}" cy="{ly - 4}" r="3.5" fill="{colors[k]}"/>')
-        body.append(text(lx + 12, ly, trunc(k, 9), 10, MID))
-    wrap(body, h, f"Coding insights of {NAME}", out)
-
-
 def build_wakatime(key, out):
     auth = base64.b64encode(key.encode()).decode()
     s = http_json("https://wakatime.com/api/v1/users/current/stats/last_7_days", {"Authorization": f"Basic {auth}"})["data"]
@@ -294,7 +240,6 @@ def main():
         d = fetch(token)
     build_repos(d, f"repos{suffix}.svg")
     build_activity(d, f"activity{suffix}.svg")
-    build_insights(d, f"insights{suffix}.svg")
     key = os.environ.get("WAKATIME_API_KEY")
     if key and not suffix:
         try:

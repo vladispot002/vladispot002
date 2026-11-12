@@ -7,6 +7,7 @@ on:
   push:
     paths:
       - make_stats.py
+      - make_extra.py
 
 permissions:
   contents: write
@@ -32,11 +33,18 @@ jobs:
           GH_TOKEN: ${{ secrets.STATS_TOKEN || secrets.GITHUB_TOKEN }}
           GH_LOGIN: ${{ github.repository_owner }}
         run: python3 make_stats.py
+      - name: Generate repos, activity, insights (and wakatime) SVGs
+        env:
+          GH_TOKEN: ${{ secrets.STATS_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_LOGIN: ${{ github.repository_owner }}
+          WAKATIME_API_KEY: ${{ secrets.WAKATIME_API_KEY }}
+        run: python3 make_extra.py
       - name: Commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add stats.svg graph.svg
+          git add stats.svg graph.svg repos.svg activity.svg insights.svg
+          [ -f wakatime.svg ] && git add wakatime.svg || true
           git diff --cached --quiet && exit 0
           git commit -m "Update stats"
           git pull --rebase

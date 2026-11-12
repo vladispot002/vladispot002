@@ -47,7 +47,7 @@ jobs:
           [ -f wakatime.svg ] && git add wakatime.svg || true
           git diff --cached --quiet && exit 0
           git commit -m "Update stats"
-          git pull --rebase
+          git pull --rebase -X theirs  # generated files: prefer freshly built ones
           git push
       - name: Open issue on failure
         if: failure() && github.event_name == 'schedule'

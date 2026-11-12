@@ -10,10 +10,16 @@ on:
 
 permissions:
   contents: write
+  issues: write
+
+concurrency:
+  group: profile-stats
+  cancel-in-progress: false
 
 jobs:
   stats:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,6 +27,8 @@ jobs:
           python-version: "3.12"
       - name: Generate stats.svg and graph.svg
         env:
+          # STATS_TOKEN (PAT with read:user + repo) adds private contributions;
+          # falls back to the default token (public data only).
           GH_TOKEN: ${{ secrets.STATS_TOKEN || secrets.GITHUB_TOKEN }}
           GH_LOGIN: ${{ github.repository_owner }}
         run: python3 make_stats.py
@@ -29,5 +37,16 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add stats.svg graph.svg
-          git diff --cached --quiet || git commit -m "Update stats"
+          git diff --cached --quiet && exit 0
+          git commit -m "Update stats"
+          git pull --rebase
           git push
+      - name: Open issue on failure
+        if: failure() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue list --label stats-failure --state open --json number --jq 'length' | grep -qx 0 || exit 0
+          gh label create stats-failure --color d73a4a 2>/dev/null || true
+          gh issue create --label stats-failure --title "Stats workflow failed" \
+            --body "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

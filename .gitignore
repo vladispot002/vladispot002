@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 stats-demo.svg
 graph-demo.svg
+stats-demo.svg
+graph-demo.svg
+*-demo.svg

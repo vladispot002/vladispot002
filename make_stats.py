@@ -15,6 +15,8 @@ import base64
 import json
 import os
 import sys
+import time
+import urllib.error
 import urllib.request
 from datetime import date, timedelta
 from xml.sax.saxutils import escape
@@ -63,17 +65,24 @@ query($login:String!,$from:DateTime!,$to:DateTime!){
 """
 
 
-def gql(query, variables, token):
-    req = urllib.request.Request(
-        API,
-        data=json.dumps({"query": query, "variables": variables}).encode(),
-        headers={"Authorization": f"bearer {token}", "Content-Type": "application/json", "User-Agent": "profile-stats"},
-    )
-    with urllib.request.urlopen(req, timeout=60) as r:
-        data = json.load(r)
-    if "errors" in data:
-        raise SystemExit(json.dumps(data["errors"], indent=1))
-    return data["data"]
+def gql(query, variables, token, retries=4):
+    body = json.dumps({"query": query, "variables": variables}).encode()
+    headers = {"Authorization": f"bearer {token}", "Content-Type": "application/json", "User-Agent": "profile-stats"}
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(API, data=body, headers=headers)
+            with urllib.request.urlopen(req, timeout=60) as r:
+                data = json.load(r)
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as e:
+            code = getattr(e, "code", None)
+            # retry on network errors, 5xx and rate limiting; fail fast on other 4xx
+            if attempt == retries - 1 or (code is not None and code < 500 and code not in (403, 429)):
+                raise
+            time.sleep(2 ** attempt * 5)
+            continue
+        if "errors" in data:
+            raise SystemExit(json.dumps(data["errors"], indent=1))
+        return data["data"]
 
 
 def fetch(token):

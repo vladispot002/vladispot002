@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+stats-demo.svg
+graph-demo.svg
